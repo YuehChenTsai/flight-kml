@@ -1,11 +1,5 @@
-// =============================================================
-// Cloudflare Pages Function — adsb.fi trace 代理
-// 用途：只解決 globe.adsb.fi 的 CORS 問題，不需任何認證
-// =============================================================
-
-const ALLOWED_ORIGINS = [
-  'https://globe.adsb.fi',
-];
+// Cloudflare Pages Function — airplanes.live trace 代理 (CORS proxy)
+// 只允許代理 traces/ 路徑，無需任何 API key
 
 function corsHeaders(origin) {
   return {
@@ -20,35 +14,51 @@ export async function onRequest(context) {
   const { request, params } = context;
   const origin = request.headers.get('Origin') || '*';
 
+  // 處理 CORS 預檢
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders(origin) });
   }
 
   if (request.method !== 'GET') {
-    return new Response('Method not allowed', { status: 405, headers: corsHeaders(origin) });
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    });
   }
 
   try {
     const pathSegments = params.path || [];
     const apiPath = pathSegments.join('/');
 
-    // 白名單：只允許 traces 路徑
+    // 只允許代理 traces/ 開頭的路徑
     if (!apiPath.startsWith('traces/')) {
-      return new Response(JSON.stringify({ error: 'Not allowed' }), {
+      return new Response(JSON.stringify({ error: 'Path not allowed: ' + apiPath }), {
         status: 403,
         headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
       });
     }
 
-    const targetUrl = `https://globe.adsb.fi/data/${apiPath}`;
-    const resp = await fetch(targetUrl);
-    const body = await resp.text();
-
-    return new Response(body, {
-      status: resp.status,
+    // 代理到 globe.airplanes.live
+    const targetUrl = 'https://globe.airplanes.live/data/' + apiPath;
+    const resp = await fetch(targetUrl, {
       headers: {
-        'Content-Type': resp.headers.get('Content-Type') || 'application/json',
-        'Cache-Control': 'public, max-age=10',
+        'User-Agent': 'Mozilla/5.0 (compatible; FlightKML/1.0)',
+      },
+    });
+
+    if (!resp.ok) {
+      return new Response(JSON.stringify({ error: 'Upstream error: ' + resp.status }), {
+        status: resp.status,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+      });
+    }
+
+    const body = await resp.text();
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'public, max-age=30',
         ...corsHeaders(origin),
       },
     });
