@@ -6,6 +6,7 @@
 <title>✈ Flight Path to KML</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@photostructure/tz-lookup/tz.js"></script>
 <style>
 :root{--bg:#0f172a;--card:#1e293b;--border:#334155;--accent:#38bdf8;--accent-hover:#7dd3fc;--text:#e2e8f0;--text-dim:#94a3b8;--success:#4ade80;--warn:#fbbf24;--danger:#f87171}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -42,12 +43,15 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .alt-selector label{display:flex;align-items:center;gap:.3rem;cursor:pointer}
 .hidden{display:none!important}
 .leaflet-container{background:#0c1222!important}
-.leg-list{display:flex;flex-direction:column;gap:.5rem;margin-bottom:1rem;max-height:300px;overflow-y:auto}
+.leg-list{display:flex;flex-direction:column;gap:.5rem;margin-bottom:1rem;max-height:400px;overflow-y:auto}
 .leg-item{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem 1rem;cursor:pointer;transition:border-color .2s}
 .leg-item:hover,.leg-item.active{border-color:var(--accent)}
 .leg-item.active{background:#0f2a3e}
-.leg-item-title{font-weight:600;color:var(--accent);font-size:.9rem}
-.leg-item-meta{font-size:.78rem;color:var(--text-dim);margin-top:.2rem}
+.leg-item-title{font-weight:600;color:var(--accent);font-size:.9rem;margin-bottom:.3rem}
+.leg-item-meta{font-size:.78rem;color:var(--text-dim);line-height:1.7}
+.leg-item-meta .local-time{color:var(--text);font-weight:500}
+.leg-item-meta .utc-time{color:var(--text-dim);font-style:italic}
+.leg-item-meta .leg-stats{color:var(--text-dim);margin-top:.2rem}
 @media(max-width:600px){.form-grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -128,9 +132,47 @@ function setStatus(msg, type) {
   el.className = type || '';
 }
 
-function fmtTime(unix) {
+function fmtTimeUTC(unix) {
   if (!unix) return '?';
   return new Date(unix * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+
+function fmtTimeLocal(unix, tzName) {
+  if (!unix || !tzName) return '?';
+  try {
+    var d = new Date(unix * 1000);
+    var opts = {
+      timeZone: tzName,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+      hour12: false
+    };
+    var formatted = new Intl.DateTimeFormat('sv-SE', opts).format(d);
+    var abbr = getTzAbbr(d, tzName);
+    return formatted + ' ' + abbr;
+  } catch (e) {
+    return fmtTimeUTC(unix);
+  }
+}
+
+function getTzAbbr(date, tzName) {
+  try {
+    var parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tzName,
+      timeZoneName: 'short'
+    }).formatToParts(date);
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].type === 'timeZoneName') return parts[i].value;
+    }
+  } catch (e) {}
+  return tzName;
+}
+
+function lookupTz(lat, lon) {
+  try {
+    if (typeof tzlookup === 'function') return tzlookup(lat, lon);
+  } catch (e) {}
+  return 'UTC';
 }
 
 function fmtDuration(seconds) {
@@ -153,26 +195,12 @@ function getAltM(pt, useGeom) {
   return 0;
 }
 
-function isOnGround(pt) {
-  // 判定飛機是否在地面：高度低於 500ft（約 150m）或高度為 "ground"
-  var altBaro = pt[3];
-  var altGeom = pt[10];
-  if (altBaro === 'ground') return true;
-  if (altBaro !== null && altBaro !== undefined && altBaro < 500) return true;
-  if (altGeom !== null && altGeom !== undefined && altGeom < 500) return true;
-  // 如果兩個高度都是 null 且速度很低，也視為地面
-  var gs = pt[4];
-  if (altBaro === null && altGeom === null && (gs === null || gs < 50)) return true;
-  return false;
-}
-
-/* ===== 航段切分核心邏輯 ===== */
+/* ===== 航段切分：使用 flags & 2 (new leg) ===== */
 function splitLegs(trace) {
   var points = trace.trace;
   var baseTs = trace.timestamp;
   if (!points || points.length === 0) return [];
 
-  // 先過濾出有效座標的點
   var valid = [];
   for (var i = 0; i < points.length; i++) {
     if (points[i][1] !== null && points[i][2] !== null) {
@@ -183,47 +211,26 @@ function splitLegs(trace) {
 
   var legs = [];
   var currentLeg = [valid[0]];
-  var TIME_GAP = 600; // 10 分鐘的時間間隔門檻（秒）
-  var GROUND_ALT_FT = 1000; // 低於此高度（ft）視為接近地面
 
   for (var j = 1; j < valid.length; j++) {
-    var prev = valid[j - 1];
-    var curr = valid[j];
-    var dt = curr[0] - prev[0]; // 秒差
+    var flags = valid[j][6] || 0;
+    var isNewLeg = (flags & 2) > 0;
 
-    var shouldSplit = false;
-
-    if (dt > TIME_GAP) {
-      // 大時間間隔 → 檢查是否兩側都在低高度（地面停留）
-      var prevGround = isOnGround(prev);
-      var currGround = isOnGround(curr);
-      if (prevGround || currGround) {
-        shouldSplit = true;
-      }
-      // 即使不在地面，超過 30 分鐘的間隔也強制切分（可能是訊號丟失）
-      if (dt > 1800) {
-        shouldSplit = true;
-      }
-    }
-
-    if (shouldSplit) {
-      // 結束當前航段
+    if (isNewLeg) {
       if (currentLeg.length > 0) {
         legs.push(currentLeg);
       }
-      currentLeg = [curr];
+      currentLeg = [valid[j]];
     } else {
-      currentLeg.push(curr);
+      currentLeg.push(valid[j]);
     }
   }
-
-  // 最後一段
   if (currentLeg.length > 0) {
     legs.push(currentLeg);
   }
 
-  // 過濾太短的航段（僅地面滑行、少於 10 個點且最大高度低於 2000ft）
-  var filteredLegs = [];
+  // 過濾：剔除最大高度 < 2000ft 且點數 < 50 的片段（純地面移動）
+  var filtered = [];
   for (var k = 0; k < legs.length; k++) {
     var leg = legs[k];
     var maxAlt = 0;
@@ -233,21 +240,31 @@ function splitLegs(trace) {
       var ag = leg[m][10];
       if (ag !== null && ag !== undefined && ag > maxAlt) maxAlt = ag;
     }
-    // 保留條件：有飛行高度（> 2000ft）或有足夠多的點
-    if (maxAlt > 2000 || leg.length > 50) {
-      filteredLegs.push(leg);
+    if (maxAlt > 2000 || leg.length >= 50) {
+      filtered.push(leg);
     }
   }
 
-  return filteredLegs;
+  return filtered;
 }
 
 function getLegCallsign(leg) {
+  var counts = {};
+  var best = '';
+  var bestCount = 0;
   for (var i = 0; i < leg.length; i++) {
     var detail = leg[i][8];
-    if (detail && detail.flight) return detail.flight.trim();
+    if (detail && detail.flight) {
+      var cs = detail.flight.trim();
+      if (!cs) continue;
+      counts[cs] = (counts[cs] || 0) + 1;
+      if (counts[cs] > bestCount) {
+        bestCount = counts[cs];
+        best = cs;
+      }
+    }
   }
-  return '';
+  return best;
 }
 
 function getLegMaxAlt(leg) {
@@ -371,11 +388,17 @@ function renderLegList() {
 
   for (var i = 0; i < currentLegs.length; i++) {
     var leg = currentLegs[i];
-    var startTs = baseTs + leg[0][0];
-    var endTs = baseTs + leg[leg.length - 1][0];
-    var duration = leg[leg.length - 1][0] - leg[0][0];
+    var startPt = leg[0];
+    var endPt = leg[leg.length - 1];
+    var startTs = baseTs + startPt[0];
+    var endTs = baseTs + endPt[0];
+    var duration = endPt[0] - startPt[0];
     var cs = getLegCallsign(leg);
     var maxAlt = getLegMaxAlt(leg);
+
+    // 用起點/終點經緯度查時區
+    var depTz = lookupTz(startPt[1], startPt[2]);
+    var arrTz = lookupTz(endPt[1], endPt[2]);
 
     var div = document.createElement('div');
     div.className = 'leg-item' + (i === 0 ? ' active' : '');
@@ -385,20 +408,20 @@ function renderLegList() {
     var title = '航段 ' + (i + 1);
     if (cs) title += ' — ' + cs;
 
-    div.innerHTML = '<div class="leg-item-title">' + title + '</div>' +
-      '<div class="leg-item-meta">' +
-      fmtTime(startTs) + ' → ' + fmtTime(endTs) +
-      ' &nbsp;|&nbsp; 歷時 ' + fmtDuration(duration) +
-      ' &nbsp;|&nbsp; ' + leg.length + ' 航點' +
-      ' &nbsp;|&nbsp; 最高 ' + Math.round(maxAlt) + ' ft' +
-      '</div>';
+    var meta = '<div class="leg-item-meta">';
+    meta += '<div class="local-time">出發：' + fmtTimeLocal(startTs, depTz) + '</div>';
+    meta += '<div class="local-time">抵達：' + fmtTimeLocal(endTs, arrTz) + '</div>';
+    meta += '<div class="utc-time">UTC：' + fmtTimeUTC(startTs) + ' → ' + fmtTimeUTC(endTs) + '</div>';
+    meta += '<div class="leg-stats">歷時 ' + fmtDuration(duration) + ' ｜ ' + leg.length + ' 航點 ｜ 最高 ' + Math.round(maxAlt).toLocaleString() + ' ft</div>';
+    meta += '</div>';
+
+    div.innerHTML = '<div class="leg-item-title">' + title + '</div>' + meta;
     container.appendChild(div);
   }
 }
 
 function selectLeg(index) {
   selectedLegIndex = index;
-  // 更新 UI 高亮
   var items = document.querySelectorAll('.leg-item');
   for (var i = 0; i < items.length; i++) {
     items[i].classList.toggle('active', parseInt(items[i].getAttribute('data-index')) === index);
@@ -428,11 +451,11 @@ function renderMap(legPoints) {
   var baseTs = currentTrace.timestamp;
   trackLayer.addLayer(
     L.circleMarker(latlngs[0], { radius: 7, color: '#4ade80', fillColor: '#4ade80', fillOpacity: 1 })
-     .bindPopup('<b>起點</b><br>' + fmtTime(baseTs + legPoints[0][0]))
+     .bindPopup('<b>起點</b><br>' + fmtTimeUTC(baseTs + legPoints[0][0]))
   );
   trackLayer.addLayer(
     L.circleMarker(latlngs[latlngs.length - 1], { radius: 7, color: '#f87171', fillColor: '#f87171', fillOpacity: 1 })
-     .bindPopup('<b>終點</b><br>' + fmtTime(baseTs + legPoints[legPoints.length - 1][0]))
+     .bindPopup('<b>終點</b><br>' + fmtTimeUTC(baseTs + legPoints[legPoints.length - 1][0]))
   );
 
   trackLayer.addTo(map);
@@ -452,6 +475,13 @@ function generateLegKML(legPoints, legIndex) {
   var baseTs = t.timestamp;
   var altModeName = useGeom ? '幾何高度 (GPS)' : '氣壓高度';
 
+  var startPt = legPoints[0];
+  var endPt = legPoints[legPoints.length - 1];
+  var startTs = baseTs + startPt[0];
+  var endTs = baseTs + endPt[0];
+  var depTz = lookupTz(startPt[1], startPt[2]);
+  var arrTz = lookupTz(endPt[1], endPt[2]);
+
   var whenLines = [];
   var coordLines = [];
 
@@ -465,8 +495,6 @@ function generateLegKML(legPoints, legIndex) {
     coordLines.push('          <gx:coord>' + lon + ' ' + lat + ' ' + altM.toFixed(1) + '</gx:coord>');
   }
 
-  var startTs = baseTs + legPoints[0][0];
-  var endTs = baseTs + legPoints[legPoints.length - 1][0];
   var nameLine = cs + (reg ? ' (' + reg + ')' : '') + (legIndex !== undefined ? ' [航段' + (legIndex + 1) + ']' : '');
 
   var kml = '<?xml version="1.0" encoding="UTF-8"?>\n';
@@ -481,8 +509,9 @@ function generateLegKML(legPoints, legIndex) {
   if (acType) kml += '    機型: ' + escXml(acType) + (desc ? ' (' + escXml(desc) + ')' : '') + '\n';
   kml += '    高度模式: ' + altModeName + '\n';
   kml += '    航點數: ' + legPoints.length + '\n';
-  kml += '    起始: ' + fmtTime(startTs) + '\n';
-  kml += '    結束: ' + fmtTime(endTs) + '\n';
+  kml += '    出發: ' + fmtTimeLocal(startTs, depTz) + ' (' + depTz + ')\n';
+  kml += '    抵達: ' + fmtTimeLocal(endTs, arrTz) + ' (' + arrTz + ')\n';
+  kml += '    UTC: ' + fmtTimeUTC(startTs) + ' → ' + fmtTimeUTC(endTs) + '\n';
   kml += '    資料來源: airplanes.live\n';
   kml += '  </description>\n';
   kml += '  <Style id="flightPath"><LineStyle><color>ffff8800</color><width>3</width></LineStyle></Style>\n';
@@ -500,12 +529,12 @@ function generateLegKML(legPoints, legIndex) {
 
   var sp = legPoints[0];
   var spAlt = getAltM(sp, useGeom);
-  kml += '  <Placemark><name>起點</name><description>' + fmtTime(startTs) + '</description><styleUrl>#startIcon</styleUrl>';
+  kml += '  <Placemark><name>起點</name><description>' + fmtTimeLocal(startTs, depTz) + '</description><styleUrl>#startIcon</styleUrl>';
   kml += '<Point><altitudeMode>absolute</altitudeMode><coordinates>' + sp[2] + ',' + sp[1] + ',' + spAlt.toFixed(1) + '</coordinates></Point></Placemark>\n';
 
   var ep = legPoints[legPoints.length - 1];
   var epAlt = getAltM(ep, useGeom);
-  kml += '  <Placemark><name>終點</name><description>' + fmtTime(endTs) + '</description><styleUrl>#endIcon</styleUrl>';
+  kml += '  <Placemark><name>終點</name><description>' + fmtTimeLocal(endTs, arrTz) + '</description><styleUrl>#endIcon</styleUrl>';
   kml += '<Point><altitudeMode>absolute</altitudeMode><coordinates>' + ep[2] + ',' + ep[1] + ',' + epAlt.toFixed(1) + '</coordinates></Point></Placemark>\n';
 
   kml += '</Document>\n</kml>';
@@ -516,10 +545,9 @@ function escXml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-/* ===== 下載單航段 KML ===== */
+/* ===== 下載 ===== */
 function downloadKML() {
   if (!currentLegs || currentLegs.length === 0) { setStatus('請先搜尋並載入軌跡', 'error'); return; }
-
   var leg = currentLegs[selectedLegIndex];
   var kml = generateLegKML(leg, selectedLegIndex);
   var cs = getLegCallsign(leg) || currentMeta.callsign || currentTrace.icao || 'flight';
@@ -527,15 +555,12 @@ function downloadKML() {
   var dateStr = new Date((baseTs + leg[0][0]) * 1000).toISOString().slice(0, 10);
   var altMode = document.querySelector('input[name="altMode"]:checked').value;
   var filename = cs + '_' + dateStr + '_leg' + (selectedLegIndex + 1) + '_' + altMode + '.kml';
-
   triggerDownload(filename, kml);
   setStatus('已下載 ' + filename, 'ok');
 }
 
-/* ===== 下載全部航段 KML ===== */
 function downloadAllKML() {
   if (!currentLegs || currentLegs.length === 0) { setStatus('請先搜尋並載入軌跡', 'error'); return; }
-
   for (var i = 0; i < currentLegs.length; i++) {
     var leg = currentLegs[i];
     var kml = generateLegKML(leg, i);
