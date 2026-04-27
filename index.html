@@ -3,581 +3,822 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>✈ Flight Path to KML</title>
+<title>Flight KML — 歷史航跡查詢與 KML 下載</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@photostructure/tz-lookup/tz.js"></script>
 <style>
-:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--accent:#38bdf8;--accent-hover:#7dd3fc;--text:#e2e8f0;--text-dim:#94a3b8;--success:#4ade80;--warn:#fbbf24;--danger:#f87171}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:1rem}
-.container{max-width:900px;margin:auto}
-header{text-align:center;padding:1.5rem 0 1rem}
-header h1{font-size:1.6rem;color:var(--accent)}
-header p{color:var(--text-dim);font-size:.85rem;margin-top:.3rem}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;margin-bottom:1rem}
-.card-title{font-size:.95rem;font-weight:600;color:var(--accent);margin-bottom:1rem;display:flex;align-items:center;gap:.4rem}
-.notice{padding:.75rem 1rem;border-radius:8px;margin-bottom:.75rem;font-size:.82rem;line-height:1.6}
-.notice.warn{background:#1a1a2e;border-left:3px solid var(--warn);color:var(--warn)}
-.notice.info{background:#0f2a3e;border-left:3px solid var(--accent);color:var(--accent)}
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
-.form-group{display:flex;flex-direction:column;gap:.3rem}
-label{font-size:.82rem;color:var(--text-dim)}
-select,input{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:.55rem .75rem;border-radius:8px;font-size:.9rem}
-select:focus,input:focus{outline:none;border-color:var(--accent)}
-.btn-row{margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap}
-button{padding:.6rem 1.2rem;border:none;border-radius:8px;cursor:pointer;font-size:.9rem;display:inline-flex;align-items:center;gap:.4rem}
-.btn-primary{background:var(--accent);color:var(--bg);font-weight:600}
-.btn-primary:hover{background:var(--accent-hover)}
-.btn-success{background:var(--success);color:var(--bg);font-weight:600}
-.btn-success:hover{background:#86efac}
-button:disabled{opacity:.4;cursor:not-allowed}
-#status{margin-top:.75rem;font-size:.82rem;min-height:1.2rem;color:var(--text-dim)}
-#status.error{color:var(--danger)}
-#status.ok{color:var(--success)}
-#status.loading{color:var(--warn)}
-.flight-info-box{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1rem;font-size:.85rem;line-height:1.8}
-.flight-info-box strong{color:var(--accent)}
-#map{height:420px;border-radius:8px;border:1px solid var(--border);margin-bottom:.75rem}
-.alt-selector{font-size:.82rem;color:var(--text-dim);margin-bottom:.75rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
-.alt-selector label{display:flex;align-items:center;gap:.3rem;cursor:pointer}
-.hidden{display:none!important}
-.leaflet-container{background:#0c1222!important}
-.leg-list{display:flex;flex-direction:column;gap:.5rem;margin-bottom:1rem;max-height:400px;overflow-y:auto}
-.leg-item{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem 1rem;cursor:pointer;transition:border-color .2s}
-.leg-item:hover,.leg-item.active{border-color:var(--accent)}
-.leg-item.active{background:#0f2a3e}
-.leg-item-title{font-weight:600;color:var(--accent);font-size:.9rem;margin-bottom:.3rem}
-.leg-item-meta{font-size:.78rem;color:var(--text-dim);line-height:1.7}
-.leg-item-meta .local-time{color:var(--text);font-weight:500}
-.leg-item-meta .utc-time{color:var(--text-dim);font-style:italic}
-.leg-item-meta .leg-stats{color:var(--text-dim);margin-top:.2rem}
-@media(max-width:600px){.form-grid{grid-template-columns:1fr}}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#0f172a; color:#e2e8f0; min-height:100vh; }
+
+/* === Header === */
+.header { background:#1e293b; padding:16px 24px; border-bottom:1px solid #334155; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+.header h1 { font-size:1.3rem; color:#38bdf8; }
+.health-bar { display:flex; gap:12px; font-size:0.78rem; }
+.health-item { display:flex; align-items:center; gap:4px; }
+.health-dot { width:8px; height:8px; border-radius:50%; background:#475569; }
+.health-dot.ok { background:#22c55e; }
+.health-dot.fail { background:#ef4444; }
+.health-dot.checking { background:#eab308; animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* === Layout === */
+.container { display:flex; height:calc(100vh - 64px); }
+.sidebar { width:440px; min-width:380px; overflow-y:auto; background:#1e293b; border-right:1px solid #334155; display:flex; flex-direction:column; }
+.map-area { flex:1; position:relative; }
+#map { width:100%; height:100%; }
+
+/* === Tabs === */
+.tabs { display:flex; border-bottom:1px solid #334155; }
+.tab-btn { flex:1; padding:10px 8px; text-align:center; background:transparent; border:none; color:#94a3b8; cursor:pointer; font-size:0.82rem; transition:all 0.2s; border-bottom:2px solid transparent; }
+.tab-btn:hover { color:#cbd5e1; background:#334155; }
+.tab-btn.active { color:#38bdf8; border-bottom-color:#38bdf8; background:#0f172a; }
+.tab-panel { display:none; padding:16px; flex-direction:column; gap:12px; }
+.tab-panel.active { display:flex; }
+
+/* === Form === */
+.form-row { display:flex; gap:8px; align-items:end; }
+.form-group { display:flex; flex-direction:column; gap:4px; flex:1; }
+.form-group label { font-size:0.75rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em; }
+.form-group input, .form-group select { background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:8px 10px; border-radius:6px; font-size:0.85rem; }
+.form-group input:focus, .form-group select:focus { outline:none; border-color:#38bdf8; }
+.btn { padding:8px 16px; border:none; border-radius:6px; font-size:0.82rem; cursor:pointer; transition:all 0.2s; white-space:nowrap; }
+.btn-primary { background:#2563eb; color:#fff; }
+.btn-primary:hover { background:#3b82f6; }
+.btn-primary:disabled { background:#475569; cursor:not-allowed; }
+.btn-success { background:#16a34a; color:#fff; }
+.btn-success:hover { background:#22c55e; }
+.btn-sm { padding:5px 10px; font-size:0.75rem; }
+.btn-outline { background:transparent; border:1px solid #475569; color:#94a3b8; }
+.btn-outline:hover { border-color:#38bdf8; color:#38bdf8; }
+
+/* === Status === */
+.status-bar { padding:8px 16px; font-size:0.8rem; min-height:36px; display:flex; align-items:center; }
+.status-bar.info { color:#38bdf8; }
+.status-bar.error { color:#f87171; }
+.status-bar.success { color:#4ade80; }
+
+/* === Results === */
+.results { flex:1; overflow-y:auto; padding:0 16px 16px; }
+.flight-info { background:#0f172a; border-radius:8px; padding:12px; margin-bottom:12px; border:1px solid #334155; }
+.flight-info h3 { color:#38bdf8; margin-bottom:6px; font-size:0.95rem; }
+.flight-info p { font-size:0.8rem; color:#94a3b8; line-height:1.6; }
+.flight-info span.val { color:#e2e8f0; }
+
+.leg-card { background:#0f172a; border:1px solid #334155; border-radius:8px; padding:12px; margin-bottom:8px; cursor:pointer; transition:all 0.2s; }
+.leg-card:hover { border-color:#38bdf8; }
+.leg-card.selected { border-color:#38bdf8; box-shadow:0 0 0 1px #38bdf8; }
+.leg-card h4 { color:#f8fafc; font-size:0.88rem; margin-bottom:6px; }
+.leg-card .leg-time { font-size:0.78rem; color:#94a3b8; line-height:1.7; }
+.leg-card .leg-time .local { color:#fbbf24; }
+.leg-card .leg-stats { font-size:0.75rem; color:#64748b; margin-top:4px; }
+.leg-actions { margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; }
+
+.dl-section { padding:12px 16px; border-top:1px solid #334155; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.dl-section label { font-size:0.75rem; color:#94a3b8; }
+.dl-section select { background:#0f172a; border:1px solid #334155; color:#e2e8f0; padding:4px 8px; border-radius:4px; font-size:0.8rem; }
+
+.help-text { font-size:0.78rem; color:#64748b; line-height:1.6; padding:8px 12px; background:#0f172a; border-radius:6px; border:1px solid #1e293b; }
+.help-text a { color:#38bdf8; text-decoration:none; }
+.help-text a:hover { text-decoration:underline; }
+
+/* === Responsive === */
+@media (max-width: 860px) {
+  .container { flex-direction:column; height:auto; }
+  .sidebar { width:100%; min-width:0; max-height:55vh; }
+  .map-area { height:45vh; }
+}
 </style>
 </head>
 <body>
-<div class="container">
-  <header>
-    <h1>✈ Flight Path to KML</h1>
-    <p>即時查詢航班軌跡，預覽並匯出為 KML 檔案</p>
-  </header>
 
-  <div class="notice info">
-    ℹ 資料來源：<strong>airplanes.live</strong> 社群即時 ADS-B 資料。僅能查詢<strong>目前正在飛行或近期有資料</strong>的航班。
-  </div>
-  <div class="notice warn">
-    ⚠ 輸入 <strong>ICAO Hex</strong>（如 8991be）、<strong>航班呼號</strong>（如 CAL130）或<strong>機身註冊號</strong>（如 B-18317）即可搜尋。
-  </div>
-
-  <div class="card">
-    <div class="card-title">🔍 查詢航班</div>
-    <div class="form-grid">
-      <div class="form-group">
-        <label for="queryType">查詢方式</label>
-        <select id="queryType">
-          <option value="hex">ICAO Hex（如 8991be）</option>
-          <option value="callsign">航班呼號（如 CAL130）</option>
-          <option value="reg">機身註冊號（如 B-18317）</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="queryValue">查詢值</label>
-        <input type="text" id="queryValue" placeholder="輸入代碼…">
-      </div>
-    </div>
-    <div class="btn-row">
-      <button class="btn-primary" id="btnSearch" onclick="searchAircraft()">🔍 搜尋航班</button>
-    </div>
-    <div id="status"></div>
-  </div>
-
-  <div class="card hidden" id="resultCard">
-    <div class="card-title">📡 航班資訊</div>
-    <div class="flight-info-box" id="flightInfo"></div>
-
-    <div class="card-title">✂ 偵測到的航段（點選以預覽）</div>
-    <div class="leg-list" id="legList"></div>
-
-    <div class="card-title">🗺 航班軌跡</div>
-    <div id="map"></div>
-
-    <div class="alt-selector">
-      <strong>KML 高度模式：</strong>
-      <label><input type="radio" name="altMode" value="geom" checked> 幾何高度 (GPS)</label>
-      <label><input type="radio" name="altMode" value="baro"> 氣壓高度</label>
-    </div>
-    <div class="btn-row">
-      <button class="btn-success" id="btnDownload" onclick="downloadKML()">📥 下載此航段 KML</button>
-      <button class="btn-primary" id="btnDownloadAll" onclick="downloadAllKML()">📦 下載全部航段 KML</button>
-    </div>
+<!-- ========== HEADER ========== -->
+<div class="header">
+  <h1>✈ Flight KML — 歷史航跡查詢</h1>
+  <div class="health-bar" id="healthBar">
+    <div class="health-item"><span class="health-dot checking" id="dot-airplaneslive"></span>airplanes.live</div>
+    <div class="health-item"><span class="health-dot checking" id="dot-adsblol"></span>adsb.lol</div>
+    <div class="health-item"><span class="health-dot checking" id="dot-hexdb"></span>hexdb.io</div>
+    <div class="health-item"><span class="health-dot checking" id="dot-opensky"></span>OpenSky</div>
   </div>
 </div>
 
+<div class="container">
+<!-- ========== SIDEBAR ========== -->
+<div class="sidebar">
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('history')">📅 歷史航跡</button>
+    <button class="tab-btn" onclick="switchTab('callsign')">🔍 航班查詢</button>
+    <button class="tab-btn" onclick="switchTab('opensky')">🛰 OpenSky</button>
+  </div>
+
+  <!-- Tab 1: 歷史航跡（以 Tail Number） -->
+  <div class="tab-panel active" id="panel-history">
+    <div class="form-row">
+      <div class="form-group">
+        <label>機身編號 (Tail Number)</label>
+        <input type="text" id="histTail" placeholder="例：B-18317" autocomplete="off">
+      </div>
+      <div class="form-group" style="max-width:150px;">
+        <label>日期</label>
+        <input type="date" id="histDate">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="max-width:180px;">
+        <label>資料來源</label>
+        <select id="histSource">
+          <option value="airplaneslive">airplanes.live</option>
+          <option value="adsblol">adsb.lol</option>
+          <option value="adsbfi">adsb.fi</option>
+          <option value="adsbx">ADS-B Exchange</option>
+          <option value="theairtraffic">TheAirTraffic</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="searchHistory()" id="btnHistory">搜尋歷史軌跡</button>
+    </div>
+    <div class="help-text">
+      輸入飛機的機身編號（如 B-18317、JA838A、9V-SWA）及日期，系統會透過 globe_history 端點取得該日完整軌跡。
+      若不知道 tail number，請使用「航班查詢」分頁。
+    </div>
+  </div>
+
+  <!-- Tab 2: 航班查詢（以 Callsign） -->
+  <div class="tab-panel" id="panel-callsign">
+    <div class="form-row">
+      <div class="form-group">
+        <label>航班呼號 (Callsign)</label>
+        <input type="text" id="csCallsign" placeholder="例：CAL052, UIA511" autocomplete="off">
+      </div>
+      <div class="form-group" style="max-width:150px;">
+        <label>日期</label>
+        <input type="date" id="csDate">
+      </div>
+    </div>
+    <div class="form-row">
+      <button class="btn btn-primary" onclick="searchCallsign()" id="btnCallsign">查詢航班</button>
+    </div>
+    <div class="help-text">
+      輸入 ICAO 航班呼號（例如華航 CI052 → <b>CAL052</b>、立榮 B7-8607 → <b>UIA8607</b>）。<br>
+      系統會先嘗試從即時 API 取得對應飛機 hex，若飛機不在飛行中，則需要手動輸入 tail number。<br>
+      <a href="https://hexdb.io/" target="_blank">hexdb.io</a> 可查詢 tail → hex 對照。
+    </div>
+  </div>
+
+  <!-- Tab 3: OpenSky -->
+  <div class="tab-panel" id="panel-opensky">
+    <div class="form-row">
+      <div class="form-group">
+        <label>ICAO24 Hex 或 Callsign</label>
+        <input type="text" id="osQuery" placeholder="例：8991be 或 CAL052" autocomplete="off">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="max-width:150px;">
+        <label>起始時間 (UTC)</label>
+        <input type="datetime-local" id="osBegin">
+      </div>
+      <div class="form-group" style="max-width:150px;">
+        <label>結束時間 (UTC)</label>
+        <input type="datetime-local" id="osEnd">
+      </div>
+    </div>
+    <div class="form-row">
+      <button class="btn btn-primary" onclick="searchOpenSky()" id="btnOpenSky">查詢 OpenSky</button>
+    </div>
+    <div class="help-text">
+      OpenSky 提供最近 30 天的歷史軌跡，但 API 可能不穩定（請看健康指示燈）。<br>
+      使用前請先確認 OpenSky 狀態為綠燈。查詢較慢，請耐心等候。
+    </div>
+  </div>
+
+  <!-- 狀態列 -->
+  <div class="status-bar info" id="statusBar">就緒，請選擇查詢方式。</div>
+
+  <!-- 結果區 -->
+  <div class="results" id="results"></div>
+
+  <!-- 下載區 -->
+  <div class="dl-section" id="dlSection" style="display:none;">
+    <label>高度模式：</label>
+    <select id="altMode">
+      <option value="geometric">幾何高度 (GPS)</option>
+      <option value="barometric">氣壓高度</option>
+    </select>
+    <button class="btn btn-success btn-sm" onclick="downloadAllKML()">⬇ 下載全部 KML</button>
+  </div>
+
+</div>
+
+<!-- ========== MAP ========== -->
+<div class="map-area">
+  <div id="map"></div>
+</div>
+</div>
+
 <script>
-/* ===== 全域設定 ===== */
-var ADSB_API = 'https://api.airplanes.live/v2';
-var TRACE_PROXY = '/api/traces';
+// ============================================================
+//  全域狀態
+// ============================================================
+let map, trackLayer, markerLayer;
+let currentLegs = [];
+let currentAircraftInfo = {};
+let selectedLegIdx = -1;
 
-var currentTrace = null;
-var currentMeta = null;
-var currentLegs = [];
-var selectedLegIndex = 0;
-var map = null;
-var trackLayer = null;
-
-/* ===== 工具函式 ===== */
-function setStatus(msg, type) {
-  var el = document.getElementById('status');
-  el.textContent = msg;
-  el.className = type || '';
+// ============================================================
+//  初始化地圖
+// ============================================================
+function initMap() {
+  map = L.map('map').setView([25, 121], 5);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    maxZoom: 18
+  }).addTo(map);
+  trackLayer = L.layerGroup().addTo(map);
+  markerLayer = L.layerGroup().addTo(map);
 }
 
-function fmtTimeUTC(unix) {
-  if (!unix) return '?';
-  return new Date(unix * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+// ============================================================
+//  Tab 切換
+// ============================================================
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+    b.classList.toggle('active', ['history','callsign','opensky'][i] === name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
 }
 
-function fmtTimeLocal(unix, tzName) {
-  if (!unix || !tzName) return '?';
+// ============================================================
+//  健康檢查
+// ============================================================
+async function checkHealth() {
   try {
-    var d = new Date(unix * 1000);
-    var opts = {
-      timeZone: tzName,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-      hour12: false
-    };
-    var formatted = new Intl.DateTimeFormat('sv-SE', opts).format(d);
-    var abbr = getTzAbbr(d, tzName);
-    return formatted + ' ' + abbr;
-  } catch (e) {
-    return fmtTimeUTC(unix);
-  }
-}
-
-function getTzAbbr(date, tzName) {
-  try {
-    var parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: tzName,
-      timeZoneName: 'short'
-    }).formatToParts(date);
-    for (var i = 0; i < parts.length; i++) {
-      if (parts[i].type === 'timeZoneName') return parts[i].value;
-    }
-  } catch (e) {}
-  return tzName;
-}
-
-function lookupTz(lat, lon) {
-  try {
-    if (typeof tzlookup === 'function') return tzlookup(lat, lon);
-  } catch (e) {}
-  return 'UTC';
-}
-
-function fmtDuration(seconds) {
-  var h = Math.floor(seconds / 3600);
-  var m = Math.floor((seconds % 3600) / 60);
-  if (h > 0) return h + 'h ' + m + 'm';
-  return m + 'm';
-}
-
-function ftToM(ft) {
-  if (ft === null || ft === undefined || ft === 'ground') return 0;
-  return ft * 0.3048;
-}
-
-function getAltM(pt, useGeom) {
-  var altGeom = pt[10];
-  var altBaro = pt[3];
-  if (useGeom && altGeom !== null && altGeom !== undefined) return ftToM(altGeom);
-  if (altBaro !== null && altBaro !== undefined && altBaro !== 'ground') return ftToM(altBaro);
-  return 0;
-}
-
-/* ===== 航段切分：使用 flags & 2 (new leg) ===== */
-function splitLegs(trace) {
-  var points = trace.trace;
-  var baseTs = trace.timestamp;
-  if (!points || points.length === 0) return [];
-
-  var valid = [];
-  for (var i = 0; i < points.length; i++) {
-    if (points[i][1] !== null && points[i][2] !== null) {
-      valid.push(points[i]);
-    }
-  }
-  if (valid.length === 0) return [];
-
-  var legs = [];
-  var currentLeg = [valid[0]];
-
-  for (var j = 1; j < valid.length; j++) {
-    var flags = valid[j][6] || 0;
-    var isNewLeg = (flags & 2) > 0;
-
-    if (isNewLeg) {
-      if (currentLeg.length > 0) {
-        legs.push(currentLeg);
-      }
-      currentLeg = [valid[j]];
-    } else {
-      currentLeg.push(valid[j]);
-    }
-  }
-  if (currentLeg.length > 0) {
-    legs.push(currentLeg);
-  }
-
-  // 過濾：剔除最大高度 < 2000ft 且點數 < 50 的片段（純地面移動）
-  var filtered = [];
-  for (var k = 0; k < legs.length; k++) {
-    var leg = legs[k];
-    var maxAlt = 0;
-    for (var m = 0; m < leg.length; m++) {
-      var a = leg[m][3];
-      if (a !== null && a !== undefined && a !== 'ground' && a > maxAlt) maxAlt = a;
-      var ag = leg[m][10];
-      if (ag !== null && ag !== undefined && ag > maxAlt) maxAlt = ag;
-    }
-    if (maxAlt > 2000 || leg.length >= 50) {
-      filtered.push(leg);
-    }
-  }
-
-  return filtered;
-}
-
-function getLegCallsign(leg) {
-  var counts = {};
-  var best = '';
-  var bestCount = 0;
-  for (var i = 0; i < leg.length; i++) {
-    var detail = leg[i][8];
-    if (detail && detail.flight) {
-      var cs = detail.flight.trim();
-      if (!cs) continue;
-      counts[cs] = (counts[cs] || 0) + 1;
-      if (counts[cs] > bestCount) {
-        bestCount = counts[cs];
-        best = cs;
+    const resp = await fetch('/api/health/all');
+    const data = await resp.json();
+    for (const [svc, result] of Object.entries(data)) {
+      const dot = document.getElementById('dot-' + svc);
+      if (dot) {
+        dot.classList.remove('checking', 'ok', 'fail');
+        dot.classList.add(result.ok ? 'ok' : 'fail');
       }
     }
+  } catch {
+    document.querySelectorAll('.health-dot').forEach(d => {
+      d.classList.remove('checking');
+      d.classList.add('fail');
+    });
   }
-  return best;
 }
 
-function getLegMaxAlt(leg) {
-  var max = 0;
-  for (var i = 0; i < leg.length; i++) {
-    var a = leg[i][10] || leg[i][3];
-    if (a !== null && a !== undefined && a !== 'ground' && a > max) max = a;
-  }
-  return max;
+// ============================================================
+//  狀態列
+// ============================================================
+function setStatus(msg, type = 'info') {
+  const bar = document.getElementById('statusBar');
+  bar.className = 'status-bar ' + type;
+  bar.textContent = msg;
 }
 
-/* ===== 搜尋航班 ===== */
-async function searchAircraft() {
-  var qType = document.getElementById('queryType').value;
-  var qVal = document.getElementById('queryValue').value.trim();
-  if (!qVal) { setStatus('請輸入查詢值', 'error'); return; }
+// ============================================================
+//  hexdb 輔助
+// ============================================================
+async function regToHex(reg) {
+  const resp = await fetch('/api/hexdb/reg-hex?reg=' + encodeURIComponent(reg.toUpperCase()));
+  if (!resp.ok) throw new Error('hexdb reg-hex 查詢失敗');
+  const text = await resp.text();
+  const hex = text.trim().replace(/"/g, '').toLowerCase();
+  if (!hex || hex.includes('error') || hex.length < 4) throw new Error('找不到該機身編號對應的 ICAO hex');
+  return hex;
+}
 
-  setStatus('正在搜尋…', 'loading');
-  document.getElementById('btnSearch').disabled = true;
-  document.getElementById('resultCard').classList.add('hidden');
+async function hexToInfo(hex) {
+  try {
+    const resp = await fetch('/api/hexdb/api/v1/aircraft/' + hex.toLowerCase());
+    if (!resp.ok) return {};
+    return await resp.json();
+  } catch { return {}; }
+}
+
+async function callsignToRoute(cs) {
+  try {
+    const resp = await fetch('/api/hexdb/api/v1/route/icao/' + cs.toUpperCase());
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch { return null; }
+}
+
+// ============================================================
+//  Tab 1：歷史航跡搜尋
+// ============================================================
+async function searchHistory() {
+  const tail = document.getElementById('histTail').value.trim();
+  const date = document.getElementById('histDate').value;
+  const source = document.getElementById('histSource').value;
+
+  if (!tail) return setStatus('請輸入機身編號', 'error');
+  if (!date) return setStatus('請選擇日期', 'error');
+
+  const btn = document.getElementById('btnHistory');
+  btn.disabled = true;
+  setStatus('正在查詢 ' + tail + ' 的 ICAO hex...', 'info');
 
   try {
-    var endpoint;
-    if (qType === 'hex') endpoint = ADSB_API + '/hex/' + qVal.toLowerCase();
-    else if (qType === 'callsign') endpoint = ADSB_API + '/callsign/' + qVal.toUpperCase();
-    else endpoint = ADSB_API + '/reg/' + qVal.toUpperCase();
+    const hex = await regToHex(tail);
+    setStatus(`找到 hex: ${hex}，正在從 ${source} 取得 ${date} 的航跡...`, 'info');
 
-    var resp = await fetch(endpoint);
-    if (!resp.ok) throw new Error('API 回應錯誤：' + resp.status);
-    var data = await resp.json();
+    const info = await hexToInfo(hex);
+    currentAircraftInfo = { hex, reg: tail.toUpperCase(), ...info };
 
-    if (!data.ac || data.ac.length === 0) {
-      setStatus('未找到該航班（可能目前未在飛行或查詢值有誤）', 'error');
-      return;
-    }
-
-    var ac = data.ac[0];
-    var hex = ac.hex;
-    if (!hex) { setStatus('找到航班但無 ICAO hex', 'error'); return; }
-
-    currentMeta = {
-      hex: hex,
-      callsign: (ac.flight || '').trim(),
-      reg: ac.r || '',
-      type: ac.t || '',
-      desc: ac.desc || ''
-    };
-
-    setStatus('找到航班 ' + hex + '，正在載入軌跡…', 'loading');
-    await loadTrace(hex);
+    const traceData = await fetchHistory(source, date, hex);
+    processTrace(traceData);
   } catch (e) {
     setStatus('搜尋失敗：' + e.message, 'error');
   } finally {
-    document.getElementById('btnSearch').disabled = false;
+    btn.disabled = false;
   }
 }
 
-/* ===== 載入軌跡 ===== */
-async function loadTrace(hex) {
-  var suffix = hex.slice(-2).toLowerCase();
-  var urls = [
-    TRACE_PROXY + '/' + suffix + '/trace_full_' + hex.toLowerCase() + '.json',
-    TRACE_PROXY + '/' + suffix + '/trace_recent_' + hex.toLowerCase() + '.json'
-  ];
+async function fetchHistory(source, date, hex) {
+  const [yyyy, mm, dd] = date.split('-');
+  const hex2 = hex.slice(-2).toLowerCase();
+  const url = `/api/history/${source}/${yyyy}/${mm}/${dd}/${hex2}/trace_full_${hex.toLowerCase()}.json`;
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    if (resp.status === 404) throw new Error(`${source} 在 ${date} 沒有此飛機的資料，嘗試換一個資料來源`);
+    throw new Error(`${source} 回傳 HTTP ${resp.status}`);
+  }
+  return await resp.json();
+}
 
-  var traceData = null;
-  for (var i = 0; i < urls.length; i++) {
+// ============================================================
+//  Tab 2：航班呼號查詢
+// ============================================================
+async function searchCallsign() {
+  const cs = document.getElementById('csCallsign').value.trim().toUpperCase();
+  const date = document.getElementById('csDate').value;
+
+  if (!cs) return setStatus('請輸入航班呼號', 'error');
+  if (!date) return setStatus('請選擇日期', 'error');
+
+  const btn = document.getElementById('btnCallsign');
+  btn.disabled = true;
+
+  try {
+    // Step 1: 嘗試即時 API
+    setStatus('嘗試從即時 API 查詢 ' + cs + '...', 'info');
+    let hex = null;
+
     try {
-      var resp = await fetch(urls[i]);
-      if (resp.ok) {
-        var text = await resp.text();
-        if (text && text.length > 10) {
-          traceData = JSON.parse(text);
-          if (traceData && traceData.trace && traceData.trace.length > 0) break;
-          traceData = null;
-        }
+      const resp = await fetch('/api/airplaneslive/callsign/' + cs);
+      const data = await resp.json();
+      if (data.ac && data.ac.length > 0) {
+        hex = data.ac[0].hex;
+        setStatus(`即時 API 找到 hex: ${hex}`, 'info');
       }
-    } catch (e) { /* 繼續 */ }
-  }
+    } catch {}
 
-  if (!traceData || !traceData.trace || traceData.trace.length === 0) {
-    setStatus('找到航班但無可用軌跡資料', 'error');
+    // Step 2: 若即時找不到，嘗試用 hexdb route 推斷航空公司，提示使用者
+    if (!hex) {
+      setStatus('飛機目前不在飛行中，嘗試查詢航線資料...', 'info');
+      const route = await callsignToRoute(cs);
+
+      // 顯示提示並讓使用者輸入 tail number
+      let html = '<div class="flight-info">';
+      html += '<h3>⚠ 飛機目前不在飛行中</h3>';
+      html += '<p>無法從即時 API 取得飛機的 ICAO hex。</p>';
+      if (route && route.route) {
+        html += `<p>航線資訊：<span class="val">${cs} → ${route.route}</span></p>`;
+      }
+      html += '<p style="margin-top:8px;">請輸入執飛此航班的機身編號（tail number），然後使用「歷史航跡」分頁查詢：</p>';
+      html += '<div style="margin-top:8px; display:flex; gap:6px;">';
+      html += '<input type="text" id="fallbackTail" placeholder="例：B-18317" style="background:#1e293b;border:1px solid #475569;color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:0.85rem;flex:1;">';
+      html += '<button class="btn btn-primary btn-sm" onclick="fallbackToHistory()">前往搜尋</button>';
+      html += '</div>';
+      html += '<p style="margin-top:8px; font-size:0.75rem; color:#64748b;">提示：可到 <a href="https://www.flightradar24.com/" target="_blank" style="color:#38bdf8;">Flightradar24</a> 或 <a href="https://flightaware.com/" target="_blank" style="color:#38bdf8;">FlightAware</a> 查看該航班號對應的飛機。</p>';
+      html += '</div>';
+      document.getElementById('results').innerHTML = html;
+      setStatus('需要機身編號才能查詢歷史資料', 'error');
+      btn.disabled = false;
+      return;
+    }
+
+    // Step 3: 有 hex 了，去抓歷史
+    const info = await hexToInfo(hex);
+    currentAircraftInfo = { hex, ...info };
+
+    setStatus(`正在取得 ${date} 的航跡...`, 'info');
+
+    // 嘗試多個來源
+    let traceData = null;
+    const sources = ['airplaneslive', 'adsblol'];
+    for (const src of sources) {
+      try {
+        traceData = await fetchHistory(src, date, hex);
+        break;
+      } catch {}
+    }
+
+    if (!traceData) {
+      // 最後嘗試即時 trace
+      try {
+        const hex2 = hex.slice(-2);
+        const resp = await fetch(`/api/traces/${hex2}/trace_full_${hex}.json`);
+        if (resp.ok) traceData = await resp.json();
+      } catch {}
+    }
+
+    if (!traceData) throw new Error('所有資料來源均無法取得該日航跡');
+
+    processTrace(traceData);
+
+  } catch (e) {
+    setStatus('搜尋失敗：' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function fallbackToHistory() {
+  const tail = document.getElementById('fallbackTail').value.trim();
+  if (!tail) return;
+  document.getElementById('histTail').value = tail;
+  document.getElementById('histDate').value = document.getElementById('csDate').value;
+  switchTab('history');
+  searchHistory();
+}
+
+// ============================================================
+//  Tab 3：OpenSky 查詢
+// ============================================================
+async function searchOpenSky() {
+  const query = document.getElementById('osQuery').value.trim();
+  const begin = document.getElementById('osBegin').value;
+  const end = document.getElementById('osEnd').value;
+
+  if (!query) return setStatus('請輸入 ICAO24 hex 或 callsign', 'error');
+  if (!begin || !end) return setStatus('請選擇起始與結束時間', 'error');
+
+  const btn = document.getElementById('btnOpenSky');
+  btn.disabled = true;
+  setStatus('正在查詢 OpenSky API...', 'info');
+
+  try {
+    const beginTs = Math.floor(new Date(begin + 'Z').getTime() / 1000);
+    const endTs = Math.floor(new Date(end + 'Z').getTime() / 1000);
+
+    const isHex = /^[0-9a-f]{6}$/i.test(query);
+    let icao24 = isHex ? query.toLowerCase() : null;
+
+    if (!icao24) {
+      // 用 callsign 搜尋航班
+      const url = `/api/opensky/flights/all?begin=${beginTs}&end=${endTs}`;
+      setStatus('正在搜尋航班（可能需要較長時間）...', 'info');
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('OpenSky 航班查詢失敗: HTTP ' + resp.status);
+      const flights = await resp.json();
+      const match = flights.find(f => f.callsign && f.callsign.trim().toUpperCase() === query.toUpperCase());
+      if (!match) throw new Error('在指定時間範圍內未找到此航班');
+      icao24 = match.icao24;
+      setStatus(`找到 icao24: ${icao24}，正在取得航跡...`, 'info');
+    }
+
+    const trackUrl = `/api/opensky/tracks/all?icao24=${icao24}&time=${beginTs}`;
+    const resp = await fetch(trackUrl);
+    if (!resp.ok) throw new Error('OpenSky 航跡查詢失敗: HTTP ' + resp.status);
+    const trackData = await resp.json();
+
+    if (!trackData.path || trackData.path.length === 0) {
+      throw new Error('OpenSky 無航跡資料');
+    }
+
+    currentAircraftInfo = { hex: icao24, source: 'OpenSky' };
+
+    // 將 OpenSky 格式轉為 readsb trace 格式以複用切分邏輯
+    const baseTs = trackData.path[0][0];
+    const trace = trackData.path.map(p => {
+      const offset = p[0] - baseTs;
+      return [offset, p[1], p[2], p[3] || null, p[4] || null, p[5] || null, 0, null, null, 'opensky', p[3] || null, null, null, null];
+    });
+
+    const fakeTraceData = {
+      icao: icao24,
+      timestamp: baseTs,
+      trace: trace,
+    };
+
+    processTrace(fakeTraceData);
+
+  } catch (e) {
+    setStatus('OpenSky 查詢失敗：' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ============================================================
+//  trace 處理：切分航段
+// ============================================================
+function processTrace(data) {
+  if (!data || !data.trace || data.trace.length === 0) {
+    setStatus('此日期無航跡資料', 'error');
     return;
   }
 
-  currentTrace = traceData;
-  currentLegs = splitLegs(traceData);
+  const baseTs = data.timestamp;
+  if (!currentAircraftInfo.hex && data.icao) currentAircraftInfo.hex = data.icao;
+  if (!currentAircraftInfo.Registration && data.r) currentAircraftInfo.Registration = data.r;
+  if (!currentAircraftInfo.reg && data.r) currentAircraftInfo.reg = data.r;
+  if (!currentAircraftInfo.Type && data.t) currentAircraftInfo.Type = data.t;
+  if (!currentAircraftInfo.desc && data.desc) currentAircraftInfo.desc = data.desc;
 
-  if (currentLegs.length === 0) {
-    setStatus('軌跡資料中未偵測到有效航段', 'error');
+  const legs = splitLegs(data.trace, baseTs);
+  currentLegs = legs;
+
+  if (legs.length === 0) {
+    setStatus('找到航跡資料但無有效飛行航段', 'error');
     return;
   }
 
-  setStatus('已載入軌跡，偵測到 ' + currentLegs.length + ' 個航段', 'ok');
-  renderFlightInfo();
-  renderLegList();
-  selectLeg(0);
-  document.getElementById('resultCard').classList.remove('hidden');
-  setTimeout(function() { if (map) map.invalidateSize(); }, 300);
+  setStatus(`找到 ${data.trace.length} 個資料點，切分為 ${legs.length} 個航段`, 'success');
+  renderResults(legs);
+  if (legs.length > 0) {
+    selectLeg(0);
+  }
+  document.getElementById('dlSection').style.display = 'flex';
 }
 
-/* ===== 顯示航班資訊 ===== */
-function renderFlightInfo() {
-  var m = currentMeta;
-  var t = currentTrace;
-  var html = '';
-  html += '<strong>ICAO：</strong>' + (t.icao || m.hex);
-  if (t.r || m.reg) html += ' &nbsp;|&nbsp; <strong>註冊號：</strong>' + (t.r || m.reg);
-  if (t.t || m.type) html += ' &nbsp;|&nbsp; <strong>機型：</strong>' + (t.t || m.type);
-  if (t.desc || m.desc) html += ' (' + (t.desc || m.desc) + ')';
-  html += '<br><strong>原始航點數：</strong>' + t.trace.length;
-  html += ' &nbsp;→&nbsp; <strong>偵測航段數：</strong>' + currentLegs.length;
-  document.getElementById('flightInfo').innerHTML = html;
+function splitLegs(trace, baseTs) {
+  if (trace.length === 0) return [];
+
+  const legs = [];
+  let currentLeg = [trace[0]];
+
+  for (let i = 1; i < trace.length; i++) {
+    const pt = trace[i];
+    const flags = pt[6] || 0;
+
+    if (flags & 2) {
+      // New leg flag
+      if (currentLeg.length > 0) legs.push(currentLeg);
+      currentLeg = [pt];
+    } else {
+      currentLeg.push(pt);
+    }
+  }
+  if (currentLeg.length > 0) legs.push(currentLeg);
+
+  // 過濾：去掉純地面段（最大高度 < 2000 ft 且點數 < 50）
+  const filtered = legs.filter(leg => {
+    let maxAlt = 0;
+    for (const pt of leg) {
+      const alt = pt[10] ?? pt[3]; // 優先用幾何高度
+      if (typeof alt === 'number' && alt > maxAlt) maxAlt = alt;
+    }
+    return !(maxAlt < 2000 && leg.length < 50);
+  });
+
+  // 為每段附加元資料
+  return filtered.map(leg => {
+    const callsign = getLegCallsign(leg);
+    const startTs = baseTs + leg[0][0];
+    const endTs = baseTs + leg[leg.length - 1][0];
+    let maxAlt = 0;
+    for (const pt of leg) {
+      const alt = pt[10] ?? pt[3];
+      if (typeof alt === 'number' && alt > maxAlt) maxAlt = alt;
+    }
+    const startLat = leg[0][1], startLon = leg[0][2];
+    const endLat = leg[leg.length - 1][1], endLon = leg[leg.length - 1][2];
+
+    return {
+      points: leg,
+      callsign,
+      startTs, endTs, maxAlt,
+      startLat, startLon,
+      endLat, endLon,
+      baseTs
+    };
+  });
 }
 
-/* ===== 航段列表 ===== */
-function renderLegList() {
-  var container = document.getElementById('legList');
-  container.innerHTML = '';
-  var baseTs = currentTrace.timestamp;
+function getLegCallsign(leg) {
+  const counts = {};
+  for (const pt of leg) {
+    if (pt[8] && pt[8].flight) {
+      const cs = pt[8].flight.trim();
+      if (cs) counts[cs] = (counts[cs] || 0) + 1;
+    }
+  }
+  let best = '', max = 0;
+  for (const [cs, c] of Object.entries(counts)) {
+    if (c > max) { max = c; best = cs; }
+  }
+  return best || 'UNKNOWN';
+}
 
-  for (var i = 0; i < currentLegs.length; i++) {
-    var leg = currentLegs[i];
-    var startPt = leg[0];
-    var endPt = leg[leg.length - 1];
-    var startTs = baseTs + startPt[0];
-    var endTs = baseTs + endPt[0];
-    var duration = endPt[0] - startPt[0];
-    var cs = getLegCallsign(leg);
-    var maxAlt = getLegMaxAlt(leg);
+// ============================================================
+//  時區工具
+// ============================================================
+function getTZ(lat, lon) {
+  try { return tzlookup(lat, lon); }
+  catch { return 'UTC'; }
+}
 
-    // 用起點/終點經緯度查時區
-    var depTz = lookupTz(startPt[1], startPt[2]);
-    var arrTz = lookupTz(endPt[1], endPt[2]);
-
-    var div = document.createElement('div');
-    div.className = 'leg-item' + (i === 0 ? ' active' : '');
-    div.setAttribute('data-index', i);
-    div.onclick = (function(idx) { return function() { selectLeg(idx); }; })(i);
-
-    var title = '航段 ' + (i + 1);
-    if (cs) title += ' — ' + cs;
-
-    var meta = '<div class="leg-item-meta">';
-    meta += '<div class="local-time">出發：' + fmtTimeLocal(startTs, depTz) + '</div>';
-    meta += '<div class="local-time">抵達：' + fmtTimeLocal(endTs, arrTz) + '</div>';
-    meta += '<div class="utc-time">UTC：' + fmtTimeUTC(startTs) + ' → ' + fmtTimeUTC(endTs) + '</div>';
-    meta += '<div class="leg-stats">歷時 ' + fmtDuration(duration) + ' ｜ ' + leg.length + ' 航點 ｜ 最高 ' + Math.round(maxAlt).toLocaleString() + ' ft</div>';
-    meta += '</div>';
-
-    div.innerHTML = '<div class="leg-item-title">' + title + '</div>' + meta;
-    container.appendChild(div);
+function formatLocalTime(ts, tz) {
+  try {
+    return new Intl.DateTimeFormat('zh-TW', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+      hour12: false
+    }).format(new Date(ts * 1000));
+  } catch {
+    return new Date(ts * 1000).toISOString().slice(0, 16).replace('T', ' ');
   }
 }
 
-function selectLeg(index) {
-  selectedLegIndex = index;
-  var items = document.querySelectorAll('.leg-item');
-  for (var i = 0; i < items.length; i++) {
-    items[i].classList.toggle('active', parseInt(items[i].getAttribute('data-index')) === index);
+function getTZAbbr(tz) {
+  try {
+    const parts = new Intl.DateTimeFormat('en', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date());
+    const tzPart = parts.find(p => p.type === 'timeZoneName');
+    return tzPart ? tzPart.value : tz;
+  } catch { return tz; }
+}
+
+function formatUTC(ts) {
+  return new Date(ts * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+}
+
+function formatDuration(secs) {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// ============================================================
+//  渲染結果
+// ============================================================
+function renderResults(legs) {
+  const el = document.getElementById('results');
+  let html = '';
+
+  // 飛機資訊
+  const info = currentAircraftInfo;
+  html += '<div class="flight-info">';
+  html += `<h3>${info.reg || info.Registration || info.hex || '?'} — ${info.desc || info.Type || info.ICAOTypeCode || '?'}</h3>`;
+  html += `<p>ICAO Hex: <span class="val">${info.hex || '?'}</span>`;
+  if (info.RegisteredOwners) html += ` · 擁有者: <span class="val">${info.RegisteredOwners}</span>`;
+  html += `</p>`;
+  html += '</div>';
+
+  // 航段列表
+  legs.forEach((leg, i) => {
+    const depTZ = getTZ(leg.startLat, leg.startLon);
+    const arrTZ = getTZ(leg.endLat, leg.endLon);
+    const depAbbr = getTZAbbr(depTZ);
+    const arrAbbr = getTZAbbr(arrTZ);
+    const dur = leg.endTs - leg.startTs;
+
+    html += `<div class="leg-card" id="leg-${i}" onclick="selectLeg(${i})">`;
+    html += `<h4>航段 ${i+1} — ${leg.callsign}</h4>`;
+    html += '<div class="leg-time">';
+    html += `出發：<span class="local">${formatLocalTime(leg.startTs, depTZ)} ${depAbbr}</span><br>`;
+    html += `抵達：<span class="local">${formatLocalTime(leg.endTs, arrTZ)} ${arrAbbr}</span><br>`;
+    html += `<span style="color:#64748b;">${formatUTC(leg.startTs)} → ${formatUTC(leg.endTs)}</span>`;
+    html += '</div>';
+    html += `<div class="leg-stats">歷時 ${formatDuration(dur)} · ${leg.points.length} 點 · 最高 ${leg.maxAlt.toLocaleString()} ft</div>`;
+    html += '<div class="leg-actions">';
+    html += `<button class="btn btn-success btn-sm" onclick="event.stopPropagation(); downloadLegKML(${i})">⬇ 下載 KML</button>`;
+    html += '</div>';
+    html += '</div>';
+  });
+
+  el.innerHTML = html;
+}
+
+// ============================================================
+//  選擇航段 → 地圖顯示
+// ============================================================
+function selectLeg(idx) {
+  selectedLegIdx = idx;
+  document.querySelectorAll('.leg-card').forEach((c, i) => c.classList.toggle('selected', i === idx));
+
+  const leg = currentLegs[idx];
+  if (!leg) return;
+
+  trackLayer.clearLayers();
+  markerLayer.clearLayers();
+
+  const altMode = document.getElementById('altMode').value;
+  const coords = leg.points
+    .filter(p => p[1] != null && p[2] != null)
+    .map(p => [p[1], p[2]]);
+
+  if (coords.length === 0) return;
+
+  const polyline = L.polyline(coords, { color: '#38bdf8', weight: 2.5, opacity: 0.85 }).addTo(trackLayer);
+
+  L.circleMarker(coords[0], { radius: 6, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1 })
+    .bindPopup(`出發<br>${formatUTC(leg.startTs)}`)
+    .addTo(markerLayer);
+
+  L.circleMarker(coords[coords.length - 1], { radius: 6, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1 })
+    .bindPopup(`抵達<br>${formatUTC(leg.endTs)}`)
+    .addTo(markerLayer);
+
+  map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+}
+
+// ============================================================
+//  KML 生成
+// ============================================================
+function generateKML(leg, altModeStr) {
+  const useGeom = altModeStr === 'geometric';
+  const kmlAltMode = 'absolute';
+  const info = currentAircraftInfo;
+
+  let coords = '';
+  for (const pt of leg.points) {
+    if (pt[1] == null || pt[2] == null) continue;
+    let alt = useGeom ? (pt[10] ?? pt[3]) : (pt[3] ?? pt[10]);
+    if (alt === 'ground' || alt == null) alt = 0;
+    const altM = Math.round(alt * 0.3048);
+    coords += `${pt[2]},${pt[1]},${altM}\n`;
   }
-  renderMap(currentLegs[index]);
+
+  const depTZ = getTZ(leg.startLat, leg.startLon);
+  const arrTZ = getTZ(leg.endLat, leg.endLon);
+  const dur = leg.endTs - leg.startTs;
+
+  const desc = [
+    `Callsign: ${leg.callsign}`,
+    `ICAO: ${info.hex || '?'}`,
+    `Registration: ${info.reg || info.Registration || '?'}`,
+    `Type: ${info.desc || info.Type || info.ICAOTypeCode || '?'}`,
+    `Altitude Mode: ${useGeom ? 'Geometric (GPS)' : 'Barometric'}`,
+    `Points: ${leg.points.length}`,
+    `Duration: ${formatDuration(dur)}`,
+    `Max Alt: ${leg.maxAlt.toLocaleString()} ft`,
+    `Departure: ${formatLocalTime(leg.startTs, depTZ)} ${getTZAbbr(depTZ)}`,
+    `Arrival: ${formatLocalTime(leg.endTs, arrTZ)} ${getTZAbbr(arrTZ)}`,
+    `UTC: ${formatUTC(leg.startTs)} → ${formatUTC(leg.endTs)}`,
+    `Source: globe_history (readsb)`,
+  ].join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+<name>${leg.callsign} — ${info.reg || info.hex || '?'}</name>
+<description><![CDATA[${desc}]]></description>
+<Style id="flightPath">
+  <LineStyle><color>ff00bfff</color><width>3</width></LineStyle>
+</Style>
+<Placemark>
+  <name>${leg.callsign}</name>
+  <description><![CDATA[${desc}]]></description>
+  <styleUrl>#flightPath</styleUrl>
+  <LineString>
+    <extrude>0</extrude>
+    <altitudeMode>${kmlAltMode}</altitudeMode>
+    <coordinates>
+${coords}
+    </coordinates>
+  </LineString>
+</Placemark>
+</Document>
+</kml>`;
 }
 
-/* ===== 地圖渲染 ===== */
-function renderMap(legPoints) {
-  if (!map) {
-    map = L.map('map', { zoomControl: true });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
-      maxZoom: 18
-    }).addTo(map);
-  }
-
-  if (trackLayer) { map.removeLayer(trackLayer); trackLayer = null; }
-  if (!legPoints || legPoints.length === 0) return;
-
-  var latlngs = legPoints.map(function(p) { return [p[1], p[2]]; });
-  trackLayer = L.layerGroup();
-
-  var polyline = L.polyline(latlngs, { color: '#38bdf8', weight: 3, opacity: 0.85 });
-  trackLayer.addLayer(polyline);
-
-  var baseTs = currentTrace.timestamp;
-  trackLayer.addLayer(
-    L.circleMarker(latlngs[0], { radius: 7, color: '#4ade80', fillColor: '#4ade80', fillOpacity: 1 })
-     .bindPopup('<b>起點</b><br>' + fmtTimeUTC(baseTs + legPoints[0][0]))
-  );
-  trackLayer.addLayer(
-    L.circleMarker(latlngs[latlngs.length - 1], { radius: 7, color: '#f87171', fillColor: '#f87171', fillOpacity: 1 })
-     .bindPopup('<b>終點</b><br>' + fmtTimeUTC(baseTs + legPoints[legPoints.length - 1][0]))
-  );
-
-  trackLayer.addTo(map);
-  map.fitBounds(polyline.getBounds(), { padding: [30, 30] });
-}
-
-/* ===== 產生單航段 KML ===== */
-function generateLegKML(legPoints, legIndex) {
-  var t = currentTrace;
-  var m = currentMeta;
-  var useGeom = document.querySelector('input[name="altMode"]:checked').value === 'geom';
-
-  var cs = getLegCallsign(legPoints) || m.callsign || t.icao || 'UNKNOWN';
-  var reg = t.r || m.reg || '';
-  var acType = t.t || m.type || '';
-  var desc = t.desc || m.desc || '';
-  var baseTs = t.timestamp;
-  var altModeName = useGeom ? '幾何高度 (GPS)' : '氣壓高度';
-
-  var startPt = legPoints[0];
-  var endPt = legPoints[legPoints.length - 1];
-  var startTs = baseTs + startPt[0];
-  var endTs = baseTs + endPt[0];
-  var depTz = lookupTz(startPt[1], startPt[2]);
-  var arrTz = lookupTz(endPt[1], endPt[2]);
-
-  var whenLines = [];
-  var coordLines = [];
-
-  for (var j = 0; j < legPoints.length; j++) {
-    var pt = legPoints[j];
-    var time = new Date((baseTs + pt[0]) * 1000).toISOString();
-    var lat = pt[1];
-    var lon = pt[2];
-    var altM = getAltM(pt, useGeom);
-    whenLines.push('          <when>' + time + '</when>');
-    coordLines.push('          <gx:coord>' + lon + ' ' + lat + ' ' + altM.toFixed(1) + '</gx:coord>');
-  }
-
-  var nameLine = cs + (reg ? ' (' + reg + ')' : '') + (legIndex !== undefined ? ' [航段' + (legIndex + 1) + ']' : '');
-
-  var kml = '<?xml version="1.0" encoding="UTF-8"?>\n';
-  kml += '<kml xmlns="http://www.opengis.net/kml/2.2"\n';
-  kml += '     xmlns:gx="http://www.google.com/kml/ext/2.2">\n';
-  kml += '<Document>\n';
-  kml += '  <name>' + escXml(nameLine) + '</name>\n';
-  kml += '  <description>\n';
-  kml += '    呼號: ' + escXml(cs) + '\n';
-  kml += '    ICAO: ' + escXml(t.icao || m.hex) + '\n';
-  if (reg) kml += '    註冊號: ' + escXml(reg) + '\n';
-  if (acType) kml += '    機型: ' + escXml(acType) + (desc ? ' (' + escXml(desc) + ')' : '') + '\n';
-  kml += '    高度模式: ' + altModeName + '\n';
-  kml += '    航點數: ' + legPoints.length + '\n';
-  kml += '    出發: ' + fmtTimeLocal(startTs, depTz) + ' (' + depTz + ')\n';
-  kml += '    抵達: ' + fmtTimeLocal(endTs, arrTz) + ' (' + arrTz + ')\n';
-  kml += '    UTC: ' + fmtTimeUTC(startTs) + ' → ' + fmtTimeUTC(endTs) + '\n';
-  kml += '    資料來源: airplanes.live\n';
-  kml += '  </description>\n';
-  kml += '  <Style id="flightPath"><LineStyle><color>ffff8800</color><width>3</width></LineStyle></Style>\n';
-  kml += '  <Style id="startIcon"><IconStyle><color>ff00ff00</color><scale>1.2</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/grn-circle.png</href></Icon></IconStyle></Style>\n';
-  kml += '  <Style id="endIcon"><IconStyle><color>ff0000ff</color><scale>1.2</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/red-circle.png</href></Icon></IconStyle></Style>\n';
-  kml += '  <Placemark>\n';
-  kml += '    <name>' + escXml(cs) + ' 飛行軌跡</name>\n';
-  kml += '    <styleUrl>#flightPath</styleUrl>\n';
-  kml += '    <gx:Track>\n';
-  kml += '      <altitudeMode>absolute</altitudeMode>\n';
-  kml += whenLines.join('\n') + '\n';
-  kml += coordLines.join('\n') + '\n';
-  kml += '    </gx:Track>\n';
-  kml += '  </Placemark>\n';
-
-  var sp = legPoints[0];
-  var spAlt = getAltM(sp, useGeom);
-  kml += '  <Placemark><name>起點</name><description>' + fmtTimeLocal(startTs, depTz) + '</description><styleUrl>#startIcon</styleUrl>';
-  kml += '<Point><altitudeMode>absolute</altitudeMode><coordinates>' + sp[2] + ',' + sp[1] + ',' + spAlt.toFixed(1) + '</coordinates></Point></Placemark>\n';
-
-  var ep = legPoints[legPoints.length - 1];
-  var epAlt = getAltM(ep, useGeom);
-  kml += '  <Placemark><name>終點</name><description>' + fmtTimeLocal(endTs, arrTz) + '</description><styleUrl>#endIcon</styleUrl>';
-  kml += '<Point><altitudeMode>absolute</altitudeMode><coordinates>' + ep[2] + ',' + ep[1] + ',' + epAlt.toFixed(1) + '</coordinates></Point></Placemark>\n';
-
-  kml += '</Document>\n</kml>';
-  return kml;
-}
-
-function escXml(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-/* ===== 下載 ===== */
-function downloadKML() {
-  if (!currentLegs || currentLegs.length === 0) { setStatus('請先搜尋並載入軌跡', 'error'); return; }
-  var leg = currentLegs[selectedLegIndex];
-  var kml = generateLegKML(leg, selectedLegIndex);
-  var cs = getLegCallsign(leg) || currentMeta.callsign || currentTrace.icao || 'flight';
-  var baseTs = currentTrace.timestamp;
-  var dateStr = new Date((baseTs + leg[0][0]) * 1000).toISOString().slice(0, 10);
-  var altMode = document.querySelector('input[name="altMode"]:checked').value;
-  var filename = cs + '_' + dateStr + '_leg' + (selectedLegIndex + 1) + '_' + altMode + '.kml';
-  triggerDownload(filename, kml);
-  setStatus('已下載 ' + filename, 'ok');
+function downloadLegKML(idx) {
+  const leg = currentLegs[idx];
+  if (!leg) return;
+  const altMode = document.getElementById('altMode').value;
+  const kml = generateKML(leg, altMode);
+  const dateStr = new Date(leg.startTs * 1000).toISOString().slice(0, 10);
+  const altSuffix = altMode === 'geometric' ? 'geom' : 'baro';
+  const filename = `${leg.callsign}_${dateStr}_leg${idx + 1}_${altSuffix}.kml`;
+  triggerDownload(kml, filename);
 }
 
 function downloadAllKML() {
-  if (!currentLegs || currentLegs.length === 0) { setStatus('請先搜尋並載入軌跡', 'error'); return; }
-  for (var i = 0; i < currentLegs.length; i++) {
-    var leg = currentLegs[i];
-    var kml = generateLegKML(leg, i);
-    var cs = getLegCallsign(leg) || currentMeta.callsign || currentTrace.icao || 'flight';
-    var baseTs = currentTrace.timestamp;
-    var dateStr = new Date((baseTs + leg[0][0]) * 1000).toISOString().slice(0, 10);
-    var altMode = document.querySelector('input[name="altMode"]:checked').value;
-    var filename = cs + '_' + dateStr + '_leg' + (i + 1) + '_' + altMode + '.kml';
-    triggerDownload(filename, kml);
-  }
-  setStatus('已下載全部 ' + currentLegs.length + ' 個航段', 'ok');
+  if (currentLegs.length === 0) return;
+  const altMode = document.getElementById('altMode').value;
+  currentLegs.forEach((leg, i) => {
+    const kml = generateKML(leg, altMode);
+    const dateStr = new Date(leg.startTs * 1000).toISOString().slice(0, 10);
+    const altSuffix = altMode === 'geometric' ? 'geom' : 'baro';
+    const filename = `${leg.callsign}_${dateStr}_leg${i + 1}_${altSuffix}.kml`;
+    triggerDownload(kml, filename);
+  });
 }
 
-function triggerDownload(filename, content) {
-  var blob = new Blob([content], { type: 'application/vnd.google-earth.kml+xml' });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
+function triggerDownload(content, filename) {
+  const blob = new Blob([content], { type: 'application/vnd.google-earth.kml+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
@@ -586,26 +827,40 @@ function triggerDownload(filename, content) {
   URL.revokeObjectURL(url);
 }
 
-/* ===== 初始化 ===== */
-window.addEventListener('DOMContentLoaded', function() {
-  document.getElementById('queryValue').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') searchAircraft();
-  });
-
-  var params = new URLSearchParams(window.location.search);
-  if (params.get('icao')) {
-    document.getElementById('queryType').value = 'hex';
-    document.getElementById('queryValue').value = params.get('icao');
-    searchAircraft();
-  } else if (params.get('callsign')) {
-    document.getElementById('queryType').value = 'callsign';
-    document.getElementById('queryValue').value = params.get('callsign');
-    searchAircraft();
-  } else if (params.get('reg')) {
-    document.getElementById('queryType').value = 'reg';
-    document.getElementById('queryValue').value = params.get('reg');
-    searchAircraft();
+// ============================================================
+//  URL 參數支援
+// ============================================================
+function handleURLParams() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('tail') && params.get('date')) {
+    document.getElementById('histTail').value = params.get('tail');
+    document.getElementById('histDate').value = params.get('date');
+    if (params.get('source')) document.getElementById('histSource').value = params.get('source');
+    switchTab('history');
+    searchHistory();
+  } else if (params.get('callsign') && params.get('date')) {
+    document.getElementById('csCallsign').value = params.get('callsign');
+    document.getElementById('csDate').value = params.get('date');
+    switchTab('callsign');
+    searchCallsign();
   }
+}
+
+// ============================================================
+//  初始化
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+  // 設定日期預設值為今天
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById('histDate').value = today;
+  document.getElementById('csDate').value = today;
+
+  initMap();
+  checkHealth();
+  handleURLParams();
+
+  // 每 60 秒重新檢查
+  setInterval(checkHealth, 60000);
 });
 </script>
 </body>
