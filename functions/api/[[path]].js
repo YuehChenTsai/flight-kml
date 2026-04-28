@@ -1,5 +1,5 @@
 // functions/api/[[path]].js
-// Cloudflare Pages Functions — 統一 API 代理
+// Cloudflare Pages Functions — 統一 API 代理（修正版）
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -16,6 +16,28 @@ function corsResponse(body, status = 200, contentType = 'application/json') {
 
 function errorResponse(msg, status = 400) {
   return corsResponse(JSON.stringify({ error: msg }), status);
+}
+
+// 帶 User-Agent 和 Referer 的 fetch，避免被目標伺服器擋
+async function proxyFetch(url, timeout = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const resp = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; FlightKML/1.0)',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Encoding': 'gzip, deflate',
+      },
+      cf: { cacheTtl: 300, cacheEverything: true },
+    });
+    clearTimeout(timer);
+    return resp;
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
 }
 
 export async function onRequestOptions() {
@@ -44,7 +66,7 @@ export async function onRequestGet(context) {
         return errorResponse('Invalid trace path');
       }
       const target = `https://globe.airplanes.live/data/traces/${tracePath}`;
-      const resp = await fetch(target);
+      const resp = await proxyFetch(target);
       if (!resp.ok) return errorResponse(`Upstream error: ${resp.status}`, resp.status);
       const data = await resp.text();
       return corsResponse(data);
@@ -53,7 +75,7 @@ export async function onRequestGet(context) {
     // ============================================================
     // 2) /api/history/{source}/{YYYY}/{MM}/{DD}/{hex2}/{hex}.json
     //    → 歷史 trace（globe_history 端點）
-    //    source: airplaneslive | adsblol | adsbfi | adsbx | theairtraffic
+    //    支援多來源備援：若指定 source=auto 則依序嘗試
     // ============================================================
     if (route === 'history') {
       const SOURCES = {
@@ -64,24 +86,19 @@ export async function onRequestGet(context) {
         theairtraffic: 'https://globe.theairtraffic.com/globe_history',
       };
 
-      // segments: history / {source} / {YYYY} / {MM} / {DD} / {hex2} / {hex}.json
+      const AUTO_ORDER = ['airplaneslive', 'adsblol', 'theairtraffic', 'adsbfi', 'adsbx'];
+
       if (segments.length < 7) {
         return errorResponse('Format: /api/history/{source}/{YYYY}/{MM}/{DD}/{hex2}/{hex}.json');
       }
 
       const source = segments[1];
-      const baseUrl = SOURCES[source];
-      if (!baseUrl) {
-        return errorResponse(`Unknown source: ${source}. Valid: ${Object.keys(SOURCES).join(', ')}`);
-      }
-
       const yyyy = segments[2];
       const mm = segments[3];
       const dd = segments[4];
       const hex2 = segments[5];
-      const filename = segments[6]; // trace_full_{hex}.json
+      const filename = segments[6];
 
-      // 驗證格式
       if (!/^\d{4}$/.test(yyyy) || !/^\d{2}$/.test(mm) || !/^\d{2}$/.test(dd)) {
         return errorResponse('Invalid date format');
       }
@@ -92,8 +109,39 @@ export async function onRequestGet(context) {
         return errorResponse('Invalid trace filename');
       }
 
-      const target = `${baseUrl}/${yyyy}/${mm}/${dd}/traces/${hex2}/${filename}`;
-      const resp = await fetch(target);
+      const buildUrl = (src) => {
+        const base = SOURCES[src];
+        return `${base}/${yyyy}/${mm}/${dd}/traces/${hex2}/${filename}`;
+      };
+
+      // auto 模式：依序嘗試所有來源
+      if (source === 'auto') {
+        const errors = [];
+        for (const src of AUTO_ORDER) {
+          try {
+            const target = buildUrl(src);
+            const resp = await proxyFetch(target, 12000);
+            if (resp.ok) {
+              const data = await resp.text();
+              // 在回應中加入來源資訊
+              return corsResponse(data, 200, 'application/json');
+            }
+            errors.push(`${src}:${resp.status}`);
+          } catch (e) {
+            errors.push(`${src}:${e.message}`);
+          }
+        }
+        return errorResponse(`所有資料來源均失敗: ${errors.join(', ')}`, 502);
+      }
+
+      // 指定來源
+      const baseUrl = SOURCES[source];
+      if (!baseUrl) {
+        return errorResponse(`Unknown source: ${source}. Valid: ${Object.keys(SOURCES).join(', ')}, auto`);
+      }
+
+      const target = buildUrl(source);
+      const resp = await proxyFetch(target);
       if (!resp.ok) {
         return errorResponse(`Source ${source} returned ${resp.status}`, resp.status);
       }
@@ -102,34 +150,17 @@ export async function onRequestGet(context) {
     }
 
     // ============================================================
-    // 3) /api/hexdb/{sub-path}
+    // 3) /api/hexdb/...
     //    → 代理 hexdb.io API
     // ============================================================
     if (route === 'hexdb') {
       const subPath = segments.slice(1).join('/');
       if (!subPath) return errorResponse('Missing hexdb path');
 
-      // 允許的端點白名單
-      const allowed = [
-        /^reg-hex\?reg=.+$/i,
-        /^api\/v1\/aircraft\/[0-9a-f]+$/i,
-        /^api\/v1\/route\/icao\/.+$/i,
-        /^api\/v1\/route\/iata\/.+$/i,
-        /^api\/v1\/airport\/icao\/[A-Z]{4}$/i,
-        /^api\/v1\/airport\/iata\/[A-Z]{3}$/i,
-        /^hex-type\?hex=[0-9a-f]+$/i,
-      ];
-
       const query = url.search || '';
       const fullSub = subPath + query;
-
-      const isAllowed = allowed.some(re => re.test(fullSub));
-      if (!isAllowed) {
-        return errorResponse('hexdb path not allowed');
-      }
-
       const target = `https://hexdb.io/${fullSub}`;
-      const resp = await fetch(target);
+      const resp = await proxyFetch(target);
       if (!resp.ok) return errorResponse(`hexdb returned ${resp.status}`, resp.status);
       const data = await resp.text();
       const ct = resp.headers.get('Content-Type') || 'text/plain';
@@ -137,7 +168,7 @@ export async function onRequestGet(context) {
     }
 
     // ============================================================
-    // 4) /api/opensky/{sub-path}
+    // 4) /api/opensky/...
     //    → 代理 OpenSky API
     // ============================================================
     if (route === 'opensky') {
@@ -146,22 +177,22 @@ export async function onRequestGet(context) {
 
       const query = url.search || '';
       const target = `https://opensky-network.org/api/${subPath}${query}`;
-      const resp = await fetch(target);
+      const resp = await proxyFetch(target, 20000);
       if (!resp.ok) return errorResponse(`OpenSky returned ${resp.status}`, resp.status);
       const data = await resp.text();
       return corsResponse(data);
     }
 
     // ============================================================
-    // 5) /api/airplaneslive/{sub-path}
-    //    → 代理 airplanes.live REST API（即時查詢）
+    // 5) /api/airplaneslive/...
+    //    → 代理 airplanes.live REST API
     // ============================================================
     if (route === 'airplaneslive') {
       const subPath = segments.slice(1).join('/');
       if (!subPath) return errorResponse('Missing airplaneslive path');
 
       const target = `https://api.airplanes.live/v2/${subPath}`;
-      const resp = await fetch(target);
+      const resp = await proxyFetch(target);
       if (!resp.ok) return errorResponse(`airplanes.live returned ${resp.status}`, resp.status);
       const data = await resp.text();
       return corsResponse(data);
@@ -169,10 +200,29 @@ export async function onRequestGet(context) {
 
     // ============================================================
     // 6) /api/health/{service}
-    //    → 健康檢查
     // ============================================================
     if (route === 'health') {
       const service = segments[1];
+
+      async function check(checkUrl, timeout = 8000) {
+        try {
+          const resp = await proxyFetch(checkUrl, timeout);
+          return { ok: resp.status < 500, status: resp.status };
+        } catch {
+          return { ok: false, status: 0 };
+        }
+      }
+
+      if (service === 'all') {
+        const [airplaneslive, adsblol, hexdb, opensky] = await Promise.all([
+          check('https://api.airplanes.live/v2/hex/000000'),
+          check('https://globe.adsb.lol/globe_history/2026/01/01/traces/00/trace_full_000000.json'),
+          check('https://hexdb.io/api/v1/aircraft/000000'),
+          check('https://opensky-network.org/api/time'),
+        ]);
+        return corsResponse(JSON.stringify({ airplaneslive, adsblol, hexdb, opensky }));
+      }
+
       const checks = {
         airplaneslive: 'https://api.airplanes.live/v2/hex/000000',
         adsblol: 'https://globe.adsb.lol/globe_history/2026/01/01/traces/00/trace_full_000000.json',
@@ -180,32 +230,13 @@ export async function onRequestGet(context) {
         opensky: 'https://opensky-network.org/api/time',
       };
 
-      if (service === 'all') {
-        const results = {};
-        await Promise.all(
-          Object.entries(checks).map(async ([name, checkUrl]) => {
-            try {
-              const r = await fetch(checkUrl, { signal: AbortSignal.timeout(8000) });
-              results[name] = { ok: r.status < 500, status: r.status };
-            } catch {
-              results[name] = { ok: false, status: 0 };
-            }
-          })
-        );
-        return corsResponse(JSON.stringify(results));
-      }
-
       const checkUrl = checks[service];
       if (!checkUrl) {
-        return errorResponse(`Unknown service: ${service}. Valid: ${Object.keys(checks).join(', ')}, all`);
+        return errorResponse(`Unknown service. Valid: ${Object.keys(checks).join(', ')}, all`);
       }
 
-      try {
-        const r = await fetch(checkUrl, { signal: AbortSignal.timeout(8000) });
-        return corsResponse(JSON.stringify({ ok: r.status < 500, status: r.status }));
-      } catch {
-        return corsResponse(JSON.stringify({ ok: false, status: 0 }));
-      }
+      const result = await check(checkUrl);
+      return corsResponse(JSON.stringify(result));
     }
 
     return errorResponse(`Unknown route: ${route}`);
